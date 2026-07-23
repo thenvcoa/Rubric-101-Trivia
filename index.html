@@ -2826,6 +2826,22 @@ async function sList(prefix){
     return (data && data.keys) ? data.keys : [];
   } catch(e){ return []; }
 }
+async function sGetByPrefix(prefix){
+  // Fetches all matching key-values in ONE request instead of one request
+  // per key — this is what keeps things fast as the player count grows.
+  // Requires Code.gs to have the 'getByPrefix' action (added after the
+  // initial build — redeploy Code.gs if this ever returns nothing unexpected).
+  try{
+    const res = await fetch(`${APPS_SCRIPT_URL}?action=getByPrefix&prefix=${encodeURIComponent(prefix)}`);
+    const data = await res.json();
+    if(!data || !data.values) return {};
+    const parsed = {};
+    for(const k in data.values){
+      try{ parsed[k] = JSON.parse(data.values[k]); } catch(e){ parsed[k] = data.values[k]; }
+    }
+    return parsed;
+  } catch(e){ return {}; }
+}
 async function sDelete(key){
   try{
     const res = await fetch(`${APPS_SCRIPT_URL}?action=delete&key=${encodeURIComponent(key)}`);
@@ -4203,13 +4219,8 @@ function lbRowHtml(p, i){
   </div>`;
 }
 async function getAllPlayers(){
-  const keys = await sList('player:');
-  const players = [];
-  for(const k of keys){
-    const v = await sGet(k);
-    if(v) players.push(v);
-  }
-  return players;
+  const valuesObj = await sGetByPrefix('player:');
+  return Object.values(valuesObj).filter(Boolean);
 }
 async function getRankedPlayers(){
   const players = await getAllPlayers();
@@ -4255,10 +4266,26 @@ function startRingTicker(q, state, isHost){
 }
 
 // ---------- polling loop: reacts to shared game:state ----------
+// Uses a self-scheduling setTimeout chain (NOT setInterval) so a new poll
+// never starts until the previous one has fully finished. This matters once
+// there are enough players that a poll cycle can occasionally take longer
+// than the interval — setInterval would let cycles pile up on top of each
+// other under that condition, overloading the backend and causing exactly
+// the kind of multi-click, multi-second lag this was built to avoid.
+let pollingActive = false;
 function startPolling(){
-  clearInterval(pollTimer);
-  pollLoop();
-  pollTimer = setInterval(pollLoop, 1500);
+  pollingActive = true;
+  clearTimeout(pollTimer);
+  scheduleNextPoll(0);
+}
+function scheduleNextPoll(delay){
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(async ()=>{
+    if(!pollingActive) return;
+    try{ await pollLoop(); }
+    catch(e){ console.error('poll cycle failed', e); }
+    scheduleNextPoll(1500);
+  }, delay);
 }
 let lastRenderedKey = null;
 let lastVideoPlayToken = null;
