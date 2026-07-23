@@ -2901,6 +2901,7 @@ const DEFAULT_STATE = {
   pausedRemainingMs: null,
   showAnswer: false,     // true = "Show Answer" popup should be visible on Host + Player screens
   videoPlayToken: 0,     // incremented to remote-trigger video playback on the Host screen (youtube/mp4 only)
+  videoLoopEnabled: false, // toggled remotely from Console to loop the current video on the Host screen
   updatedAt: Date.now()
 };
 
@@ -3473,6 +3474,11 @@ function consoleControlsHtml(st){
     const canRemotePlay = vq && (vq.videoType === 'youtube' || vq.videoType === 'mp4');
     return `${canRemotePlay ? `<button class="btn big" onclick="triggerVideoPlay()">▶ Play Video</button>` : ''}
       <button class="btn ${canRemotePlay ? 'secondary' : 'big'}" onclick="hostStartTimer()">▶ Start Question Timer</button>
+      ${canRemotePlay ? `
+        <div class="console-subrow">
+          <button class="btn secondary" onclick="toggleVideoLoop()">🔁 Loop: ${st.videoLoopEnabled ? 'On' : 'Off'}</button>
+        </div>
+        <div class="muted" style="margin-top:4px;">⛶ Fullscreen only works when pressed on the Host screen itself — browsers block remote fullscreen requests.</div>` : ''}
       <div class="console-subrow">
         ${hasPrev ? `<button class="btn secondary" onclick="hostGoToQuestion(${st.qIndex-1})">◀ Previous</button>` : ''}
       </div>
@@ -3698,6 +3704,13 @@ window.hostGoToQuestion = async function(qIndex){
   st.screen = (q.videoType && q.videoType !== 'none') ? 'video' : 'question';
   st.questionStartAt = st.screen === 'question' ? Date.now() : 0;
   st.showAnswer = false;
+  st.videoLoopEnabled = false;
+  st.updatedAt = Date.now();
+  await saveGameState(st);
+};
+window.toggleVideoLoop = async function(){
+  const st = await sGet(STATE_KEY) || DEFAULT_STATE;
+  st.videoLoopEnabled = !st.videoLoopEnabled;
   st.updatedAt = Date.now();
   await saveGameState(st);
 };
@@ -3878,12 +3891,18 @@ function renderHostVideo(q){
     <div class="screen">
       <div class="qcounter">Question ${q.id} of ${CONFIG.questions.length}</div>
       ${bodyHtml}
-      ${remoteControllable ? `<button class="btn secondary" style="margin-top:14px;" onclick="triggerVideoPlay()">▶ Play Video</button>` : ''}
+      ${remoteControllable ? `
+        <div class="row" style="margin-top:14px;">
+          <button class="btn secondary" onclick="triggerVideoPlay()">▶ Play Video</button>
+          <button class="btn secondary" onclick="hostRequestFullscreen()">⛶ Fullscreen</button>
+          <button class="btn secondary" onclick="toggleVideoLoop()">🔁 Loop: <span id="hostLoopState">Off</span></button>
+        </div>` : ''}
       <button class="btn" style="margin-top:22px;" onclick="hostStartTimer()">Start Question Timer</button>
     </div>
     <div class="host-badge">HOST VIEW</div>
   `);
   if(q.videoType === 'youtube'){
+    let ytLoopFlag = false;
     loadYouTubeIframeAPI().then(()=>{
       if(!document.getElementById('ytHostPlayer')) return; // screen changed before API finished loading
       const player = new YT.Player('ytHostPlayer', {
@@ -3892,7 +3911,16 @@ function renderHostVideo(q){
         events: {
           onReady: function(e){
             try{ e.target.mute(); }catch(err){}
-            currentVideoController = { play: ()=>{ try{ player.playVideo(); }catch(e){} } };
+            currentVideoController = {
+              play: ()=>{ try{ player.playVideo(); }catch(e){} },
+              setLoop: (v)=>{ ytLoopFlag = v; },
+              getIframeEl: ()=>{ try{ return player.getIframe(); }catch(e){ return null; } }
+            };
+          },
+          onStateChange: function(e){
+            if(e.data === YT.PlayerState.ENDED && ytLoopFlag){
+              try{ player.seekTo(0); player.playVideo(); }catch(err){}
+            }
           }
         }
       });
@@ -3900,10 +3928,25 @@ function renderHostVideo(q){
   } else if(q.videoType === 'mp4'){
     const vidEl = document.getElementById('mp4HostPlayer');
     if(vidEl){
-      currentVideoController = { play: ()=>{ try{ vidEl.play(); }catch(e){} } };
+      currentVideoController = {
+        play: ()=>{ try{ vidEl.play(); }catch(e){} },
+        setLoop: (v)=>{ vidEl.loop = !!v; },
+        getIframeEl: ()=>vidEl
+      };
     }
   }
 }
+window.hostRequestFullscreen = function(){
+  // Fullscreen must be requested directly from a click on THIS page — browsers
+  // block fullscreen requests triggered by a remote/async signal (e.g. from
+  // the Presenter Console), so this only works when clicked here on the Host
+  // screen itself.
+  try{
+    const el = currentVideoController && currentVideoController.getIframeEl ? currentVideoController.getIframeEl() : null;
+    if(el && el.requestFullscreen){ el.requestFullscreen(); }
+    else if(el && el.webkitRequestFullscreen){ el.webkitRequestFullscreen(); }
+  }catch(e){ console.error('fullscreen request failed', e); }
+};
 window.hostStartTimer = async function(){
   const st = await sGet(STATE_KEY) || DEFAULT_STATE;
   st.screen = 'question';
@@ -4189,12 +4232,21 @@ function syncVideoPlayTrigger(st){
     if(currentVideoController && currentVideoController.play){ currentVideoController.play(); }
   }
 }
+function syncVideoLoopSetting(st){
+  if(myRole !== 'host') return;
+  if(currentVideoController && currentVideoController.setLoop){
+    currentVideoController.setLoop(!!st.videoLoopEnabled);
+  }
+  const label = document.getElementById('hostLoopState');
+  if(label) label.textContent = st.videoLoopEnabled ? 'On' : 'Off';
+}
 async function pollLoop(){
   const st = await sGet(STATE_KEY);
   if(!st) return;
   localState = st;
   syncAnswerModalDisplay(st);
   syncVideoPlayTrigger(st);
+  syncVideoLoopSetting(st);
 
   if(myRole === 'host'){
     await renderForHost(st);
@@ -4206,7 +4258,7 @@ async function pollLoop(){
 }
 let lastConsoleKey = null;
 async function renderForConsole(st){
-  const key = st.screen+':'+st.qIndex+':'+st.paused+':'+st.pausedRemainingMs+':'+consoleLayoutMode;
+  const key = st.screen+':'+st.qIndex+':'+st.paused+':'+st.pausedRemainingMs+':'+consoleLayoutMode+':'+st.videoLoopEnabled;
   if(lastConsoleKey !== key){
     lastConsoleKey = key;
     await renderConsole(st);
