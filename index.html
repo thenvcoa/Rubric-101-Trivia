@@ -4287,6 +4287,20 @@ function scheduleNextPoll(delay){
     scheduleNextPoll(1500);
   }, delay);
 }
+// Mobile browsers aggressively pause/throttle JS timers on a tab that's not
+// in the foreground (screen locked, app switched away, etc.) — this is an
+// OS/browser-level restriction, not something a web page can fully prevent.
+// The best available mitigation: as soon as the tab becomes visible again,
+// force an immediate poll instead of waiting for whatever the throttled
+// timer would have eventually done, so it catches up as fast as possible.
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState === 'visible' && pollingActive){
+    scheduleNextPoll(0);
+  }
+});
+window.addEventListener('focus', function(){
+  if(pollingActive){ scheduleNextPoll(0); }
+});
 let lastRenderedKey = null;
 let lastVideoPlayToken = null;
 function syncVideoPlayTrigger(st){
