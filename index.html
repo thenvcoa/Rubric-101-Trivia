@@ -3454,13 +3454,19 @@ function videoLinkUrl(q){
   return '';
 }
 function videoEmbedHtml(q){
-  const url = videoLinkUrl(q);
-  if(!url) return '';
-  return `<div class="video-open-card">
-      <div style="font-size:40px;">🎬</div>
-      <div class="muted" style="margin:10px 0 16px;max-width:420px;">Videos can't play inside this game window — open it in a new tab, watch it, then come back here.</div>
-      <button class="btn" onclick="window.open('${escapeAttr(url)}','_blank')">▶ Open Video</button>
-    </div>`;
+  if(q.videoType === 'gdrive'){
+    // Note: Google Drive's embedded preview player has no URL parameter for
+    // forcing mute — its own player UI includes a mute button the presenter
+    // can click if needed. This is the one video type we can't force-mute.
+    return `<div class="video-wrap"><iframe src="https://drive.google.com/file/d/${encodeURIComponent(q.videoId)}/preview" allow="autoplay" allowfullscreen></iframe></div>`;
+  }
+  if(q.videoType === 'youtube'){
+    return `<div class="video-wrap"><iframe src="https://www.youtube.com/embed/${encodeURIComponent(q.videoId)}?autoplay=1&rel=0&mute=1" allow="autoplay; encrypted-media" allowfullscreen></iframe></div>`;
+  }
+  if(q.videoType === 'mp4'){
+    return `<div class="video-wrap"><video src="${escapeAttr(q.videoId)}" controls autoplay muted></video></div>`;
+  }
+  return '';
 }
 function closeAnswerModal(){
   const el = document.getElementById('answerModal');
