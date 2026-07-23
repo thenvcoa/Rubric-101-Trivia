@@ -3615,7 +3615,7 @@ async function renderHostLobby(){
       const qr = qrcode(0, 'H');
       qr.addData(joinUrl());
       qr.make();
-      renderStyledQR(qr, qrEl);
+      qrEl.innerHTML = qr.createSvgTag(6, 24);
     }catch(e){
       console.error('QR generation failed', e);
       qrEl.innerHTML = '<div class="muted" style="color:#12141c;padding:20px;max-width:200px;">QR code unavailable — use the link below instead.</div>';
