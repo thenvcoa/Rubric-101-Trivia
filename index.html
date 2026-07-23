@@ -2639,8 +2639,8 @@ const CONFIG = {
     {
       id: 1,
       type: "single",
-      videoType: "gdrive",
-      videoId: "1JE2gs8HpiFhlcdPUSGugAvTpfwlJDKBT",
+      videoType: "youtube",
+      videoId: "zuuljWy0BBk",
       prompt: "In what difficulty range does this skill belong?",
       choices: ["Intermediate", "Advanced", "Elite", "Super Elite"],
       correctIndex: 0,
@@ -2652,8 +2652,8 @@ const CONFIG = {
     {
       id: 2,
       type: "single",
-      videoType: "gdrive",
-      videoId: "1WeryuZZlRn2jtdG0P3fwVaEYGv6MlaBq",
+      videoType: "youtube",
+      videoId: "AQKZovmy2h0",
       prompt: "What is the name of this skill as listed on the rubric?",
       choices: ["Non-Released Twisting Inversion Prep Level or Below to Extended/IBP/ABP", "Released ¼, ½ or ¾ Twisting Inverted Low to High to Extended IBP/ABP", "Released ¼, ½ or ¾ Twisting Inversion Prep Level or Below to Extended IBP/ABP", "Released ¼, ½ or ¾ Twisting Inversion Prep Level or Below to Extended"],
       correctIndex: 3,
@@ -2665,22 +2665,22 @@ const CONFIG = {
     {
       id: 3,
       type: "single",
-      videoType: "gdrive",
-      videoId: "1-Lodi26LUdUGnhB0slBC1CHg1v67l9k3",
+      videoType: "youtube",
+      videoId: "ydIcVkMitFY",
       prompt: "Script this pyramid sequence for a team of 20. What is the overall difficulty range for this sequence?",
       choices: ["Beginner", "Intermediate", "Advanced", "Elite"],
       correctIndex: 0,
       timeLimit: 120,
       explanation: "*See Video Answer*",
-      explanationVideoType: "gdrive",
-      explanationVideoId: "1YVe120Sj3jHXNOudh5He5SHXItQorHVC"
+      explanationVideoType: "youtube",
+      explanationVideoId: "sbaii8G_yt4"
     },
     {
       id: 4,
       type: "single",
       videoType: "gdrive",
       videoId: "1CBrd7G0HfX7m2U7hlVUDQ58CnPn9hv-O",
-      prompt: "Use the scripting below to determine what difficulty range this stunt sequence should be scored in for a team of 15…",
+      prompt: "Use the script shown to determine what difficulty range this stunt sequence should be scored in for a team of 15…",
       choices: ["Beginner", "Intermediate", "Advanced", "Elite"],
       correctIndex: 1,
       timeLimit: 30,
@@ -2691,8 +2691,8 @@ const CONFIG = {
     {
       id: 5,
       type: "single",
-      videoType: "gdrive",
-      videoId: "1eH8wirJiZw0GeL0hvhkPFSPyAeOfFXSI",
+      videoType: "youtube",
+      videoId: "cqkaOj90pqQ",
       prompt: "What range should this jump sequence be scored in?",
       choices: ["0 - 1.5", "1.75 - 2.75", "3.00 - 4.00", "4.25 - 4.75"],
       correctIndex: 2,
@@ -2704,8 +2704,8 @@ const CONFIG = {
     {
       id: 6,
       type: "single",
-      videoType: "gdrive",
-      videoId: "1p2ih6qAHL0vbIl0ThBUAfUAHm5C8XXBb",
+      videoType: "youtube",
+      videoId: "meHcoSxVJlM",
       prompt: "What difficulty range does this skill score in?",
       choices: ["Intermediate", "Advanced", "Elite", "Super Elite"],
       correctIndex: 2,
@@ -2717,8 +2717,8 @@ const CONFIG = {
     {
       id: 7,
       type: "single",
-      videoType: "gdrive",
-      videoId: "1UEij7eg2YRDEAveMCDZsrMKOZXgHpIX4",
+      videoType: "youtube",
+      videoId: "S9MyN3Z8imA",
       prompt: "Does this skill meet the rubric requirement for an inverted release to extended ABP?",
       choices: ["Yes", "No"],
       correctIndex: 0,
@@ -2759,7 +2759,7 @@ const CONFIG = {
       type: "single",
       videoType: "gdrive",
       videoId: "1AI--eyGehqIJV6yuONihNN-Q0bRuv7Fl",
-      prompt: "Use the scripting below to determine what difficulty range this tumbling sequence should be scored in for a team of 15…",
+      prompt: "Use the script shown to determine what difficulty range this tumbling sequence should be scored in for a team of 15…",
       choices: ["0 - 1.0", "1.25 - 2.50", "2.75 - 4.0", "4.25 - 5.0"],
       correctIndex: 2,
       timeLimit: 30,
@@ -2899,6 +2899,8 @@ const DEFAULT_STATE = {
   questionStartAt: 0,
   paused: false,
   pausedRemainingMs: null,
+  showAnswer: false,     // true = "Show Answer" popup should be visible on Host + Player screens
+  videoPlayToken: 0,     // incremented to remote-trigger video playback on the Host screen (youtube/mp4 only)
   updatedAt: Date.now()
 };
 
@@ -3467,7 +3469,10 @@ function consoleControlsHtml(st){
     return `<button class="btn big" onclick="hostGoToQuestion(0)">▶ Show Question 1</button>`;
   }
   if(st.screen === 'video'){
-    return `<button class="btn big" onclick="hostStartTimer()">▶ Start Question Timer</button>
+    const vq = CONFIG.questions[st.qIndex];
+    const canRemotePlay = vq && (vq.videoType === 'youtube' || vq.videoType === 'mp4');
+    return `${canRemotePlay ? `<button class="btn big" onclick="triggerVideoPlay()">▶ Play Video</button>` : ''}
+      <button class="btn ${canRemotePlay ? 'secondary' : 'big'}" onclick="hostStartTimer()">▶ Start Question Timer</button>
       <div class="console-subrow">
         ${hasPrev ? `<button class="btn secondary" onclick="hostGoToQuestion(${st.qIndex-1})">◀ Previous</button>` : ''}
       </div>
@@ -3579,7 +3584,7 @@ function joinUrl(){
   return base + '#play';
 }
 async function renderHostLobby(){
-  closeAnswerModal();
+  removeAnswerModalDom();
   const urlIsUsable = looksLikeRealUrl(joinUrl());
   render(`
     <div class="screen">
@@ -3671,7 +3676,7 @@ window.hostResetGame = function(){
   });
 };
 function renderHostIntro(){
-  closeAnswerModal();
+  removeAnswerModalDom();
   render(`
     <div class="screen">
       <img class="brand-logo md" src="${LOGO_DATA_URI}" alt="logo">
@@ -3692,6 +3697,7 @@ window.hostGoToQuestion = async function(qIndex){
   const q = CONFIG.questions[qIndex];
   st.screen = (q.videoType && q.videoType !== 'none') ? 'video' : 'question';
   st.questionStartAt = st.screen === 'question' ? Date.now() : 0;
+  st.showAnswer = false;
   st.updatedAt = Date.now();
   await saveGameState(st);
 };
@@ -3722,16 +3728,19 @@ function videoEmbedHtml(q){
   }
   return '';
 }
-function closeAnswerModal(){
+function removeAnswerModalDom(){
   const el = document.getElementById('answerModal');
   if(el) el.remove();
   try{ if(window.speechSynthesis) window.speechSynthesis.cancel(); }catch(e){}
 }
-window.closeAnswerModal = closeAnswerModal;
-window.hostShowAnswerModal = function(){
-  closeAnswerModal();
-  const st = localState;
-  const q = CONFIG.questions[st.qIndex];
+window.closeAnswerModal = async function(){
+  removeAnswerModalDom();
+  const st = await sGet(STATE_KEY) || DEFAULT_STATE;
+  st.showAnswer = false;
+  st.updatedAt = Date.now();
+  await saveGameState(st);
+};
+function buildAnswerModalHtml(q){
   let correctText;
   if(q.type === 'multi'){
     correctText = q.correctIndexes.map(i=>q.choices[i]).join(', ');
@@ -3743,10 +3752,7 @@ window.hostShowAnswerModal = function(){
   }
   const hasExplanationVideo = q.explanationVideoType && q.explanationVideoType !== 'none' && q.explanationVideoId;
   const videoHtml = hasExplanationVideo ? videoEmbedHtml({videoType: q.explanationVideoType, videoId: q.explanationVideoId}) : '';
-  const overlay = document.createElement('div');
-  overlay.id = 'answerModal';
-  overlay.className = 'modal-overlay';
-  overlay.innerHTML = `
+  return `
     <div class="modal-card">
       <div class="eyebrow">Correct Answer</div>
       <h2 style="margin:4px 0 0;">${escapeHtml(correctText)}</h2>
@@ -3758,7 +3764,26 @@ window.hostShowAnswerModal = function(){
       </div>
     </div>
   `;
-  document.body.appendChild(overlay);
+}
+function syncAnswerModalDisplay(st){
+  const shouldShow = !!st.showAnswer && st.qIndex != null && CONFIG.questions[st.qIndex];
+  const existing = document.getElementById('answerModal');
+  if(shouldShow && !existing){
+    const q = CONFIG.questions[st.qIndex];
+    const overlay = document.createElement('div');
+    overlay.id = 'answerModal';
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = buildAnswerModalHtml(q);
+    document.body.appendChild(overlay);
+  } else if(!shouldShow && existing){
+    removeAnswerModalDom();
+  }
+}
+window.hostShowAnswerModal = async function(){
+  const st = await sGet(STATE_KEY) || DEFAULT_STATE;
+  st.showAnswer = true;
+  st.updatedAt = Date.now();
+  await saveGameState(st);
 };
 let cachedVoices = [];
 function loadVoices(){
@@ -3808,16 +3833,76 @@ window.speakQuestion = function(){
   else text += '. Choices: ' + q.choices.join(', ') + '.';
   speakText(text);
 };
+let currentVideoController = null;
+let ytApiLoadPromise = null;
+function loadYouTubeIframeAPI(){
+  if(window.YT && window.YT.Player) return Promise.resolve();
+  if(ytApiLoadPromise) return ytApiLoadPromise;
+  ytApiLoadPromise = new Promise((resolve)=>{
+    if(!document.getElementById('yt-iframe-api')){
+      const tag = document.createElement('script');
+      tag.id = 'yt-iframe-api';
+      tag.src = 'https://www.youtube.com/iframe_api';
+      document.body.appendChild(tag);
+    }
+    const prevReady = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = function(){
+      if(typeof prevReady === 'function') prevReady();
+      resolve();
+    };
+    const check = setInterval(()=>{
+      if(window.YT && window.YT.Player){ clearInterval(check); resolve(); }
+    }, 200);
+  });
+  return ytApiLoadPromise;
+}
+window.triggerVideoPlay = async function(){
+  const st = await sGet(STATE_KEY) || DEFAULT_STATE;
+  st.videoPlayToken = (st.videoPlayToken || 0) + 1;
+  st.updatedAt = Date.now();
+  await saveGameState(st);
+};
 function renderHostVideo(q){
-  closeAnswerModal();
+  removeAnswerModalDom();
+  currentVideoController = null;
+  const remoteControllable = (q.videoType === 'youtube' || q.videoType === 'mp4');
+  let bodyHtml;
+  if(q.videoType === 'youtube'){
+    bodyHtml = `<div class="video-wrap"><div id="ytHostPlayer" style="width:100%;height:100%;"></div></div>`;
+  } else if(q.videoType === 'mp4'){
+    bodyHtml = `<div class="video-wrap"><video id="mp4HostPlayer" src="${escapeAttr(q.videoId)}" controls muted playsinline></video></div>`;
+  } else {
+    bodyHtml = videoEmbedHtml(q); // gdrive: unchanged, manual click required, no remote control possible
+  }
   render(`
     <div class="screen">
       <div class="qcounter">Question ${q.id} of ${CONFIG.questions.length}</div>
-      ${videoEmbedHtml(q)}
+      ${bodyHtml}
+      ${remoteControllable ? `<button class="btn secondary" style="margin-top:14px;" onclick="triggerVideoPlay()">▶ Play Video</button>` : ''}
       <button class="btn" style="margin-top:22px;" onclick="hostStartTimer()">Start Question Timer</button>
     </div>
     <div class="host-badge">HOST VIEW</div>
   `);
+  if(q.videoType === 'youtube'){
+    loadYouTubeIframeAPI().then(()=>{
+      if(!document.getElementById('ytHostPlayer')) return; // screen changed before API finished loading
+      const player = new YT.Player('ytHostPlayer', {
+        videoId: q.videoId,
+        playerVars: { autoplay: 0, controls: 1, rel: 0, playsinline: 1 },
+        events: {
+          onReady: function(e){
+            try{ e.target.mute(); }catch(err){}
+            currentVideoController = { play: ()=>{ try{ player.playVideo(); }catch(e){} } };
+          }
+        }
+      });
+    });
+  } else if(q.videoType === 'mp4'){
+    const vidEl = document.getElementById('mp4HostPlayer');
+    if(vidEl){
+      currentVideoController = { play: ()=>{ try{ vidEl.play(); }catch(e){} } };
+    }
+  }
 }
 window.hostStartTimer = async function(){
   const st = await sGet(STATE_KEY) || DEFAULT_STATE;
@@ -3825,6 +3910,7 @@ window.hostStartTimer = async function(){
   st.questionStartAt = Date.now();
   st.paused = false;
   st.pausedRemainingMs = null;
+  st.showAnswer = false;
   st.updatedAt = Date.now();
   await saveGameState(st);
 };
@@ -3856,6 +3942,7 @@ window.hostCloseGame = function(){
     showConfirm('This ends the session for everyone (scores stay visible, but players can no longer answer). Continue?', async ()=>{
       const st = await sGet(STATE_KEY) || DEFAULT_STATE;
       st.screen = 'closed';
+      st.showAnswer = false;
       st.updatedAt = Date.now();
       await saveGameState(st);
       resolve();
@@ -3880,7 +3967,7 @@ function questionBodyHtml(q, disabled){
     </div>${hint}`;
 }
 async function renderHostQuestion(q, state){
-  closeAnswerModal();
+  removeAnswerModalDom();
   const players = await getAllPlayers();
   const answeredCount = players.filter(p => p.answers && p.answers[q.id]).length;
   render(`
@@ -3958,16 +4045,16 @@ async function renderHostReveal(q){
 }
 window.hostShowLeaderboard = async function(){
   const st = await sGet(STATE_KEY) || DEFAULT_STATE;
-  st.screen = 'leaderboard'; st.updatedAt = Date.now();
+  st.screen = 'leaderboard'; st.showAnswer = false; st.updatedAt = Date.now();
   await saveGameState(st);
 };
 window.hostShowFinal = async function(){
   const st = await sGet(STATE_KEY) || DEFAULT_STATE;
-  st.screen = 'final'; st.updatedAt = Date.now();
+  st.screen = 'final'; st.showAnswer = false; st.updatedAt = Date.now();
   await saveGameState(st);
 };
 async function renderHostLeaderboard(state){
-  closeAnswerModal();
+  removeAnswerModalDom();
   const ranked = await getRankedPlayers();
   const isLast = state.qIndex >= CONFIG.questions.length - 1;
   render(`
@@ -3985,7 +4072,7 @@ async function renderHostLeaderboard(state){
   `);
 }
 async function renderHostFinal(){
-  closeAnswerModal();
+  removeAnswerModalDom();
   const ranked = await getRankedPlayers();
   const top3 = ranked.slice(0,3);
   render(`
@@ -4007,7 +4094,7 @@ async function renderHostFinal(){
   `);
 }
 async function renderHostClosed(){
-  closeAnswerModal();
+  removeAnswerModalDom();
   const ranked = await getRankedPlayers();
   render(`
     <div class="screen">
@@ -4092,10 +4179,22 @@ function startPolling(){
   pollTimer = setInterval(pollLoop, 1500);
 }
 let lastRenderedKey = null;
+let lastVideoPlayToken = null;
+function syncVideoPlayTrigger(st){
+  if(myRole !== 'host') return;
+  const token = st.videoPlayToken || 0;
+  if(lastVideoPlayToken === null){ lastVideoPlayToken = token; return; } // don't fire on first load
+  if(token !== lastVideoPlayToken){
+    lastVideoPlayToken = token;
+    if(currentVideoController && currentVideoController.play){ currentVideoController.play(); }
+  }
+}
 async function pollLoop(){
   const st = await sGet(STATE_KEY);
   if(!st) return;
   localState = st;
+  syncAnswerModalDisplay(st);
+  syncVideoPlayTrigger(st);
 
   if(myRole === 'host'){
     await renderForHost(st);
