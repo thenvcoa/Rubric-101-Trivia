@@ -2748,8 +2748,8 @@ const CONFIG = {
     {
       id: 8,
       type: "single",
-      videoType: "gdrive",
-      videoId: "1EuFgHxgDLHosiVaaM21D8tRHcvzCUZed",
+      videoType: "youtube",
+      videoId: "eCDXkWd_D8Y",
       prompt: "Does this skill meet the rubric requirement for an inverted release?",
       choices: ["Yes", "No"],
       correctIndex: 0,
@@ -4272,6 +4272,17 @@ function startRingTicker(q, state, isHost){
 // than the interval — setInterval would let cycles pile up on top of each
 // other under that condition, overloading the backend and causing exactly
 // the kind of multi-click, multi-second lag this was built to avoid.
+//
+// POLL_INTERVAL_MS + jitter: with many simultaneous players, having every
+// device poll at exactly the same cadence creates synchronized bursts of
+// requests (e.g. everyone hitting the backend in the same instant). Adding
+// a small random jitter per device spreads those requests out over time
+// instead, reducing the peak number of simultaneous requests the backend
+// sees at once — this matters more as player count grows. Bumped the base
+// interval up slightly too, trading a bit of snappiness for headroom at
+// larger audience sizes.
+const POLL_INTERVAL_MS = 2000;
+const POLL_JITTER_MS = 700;
 let pollingActive = false;
 function startPolling(){
   pollingActive = true;
@@ -4284,7 +4295,7 @@ function scheduleNextPoll(delay){
     if(!pollingActive) return;
     try{ await pollLoop(); }
     catch(e){ console.error('poll cycle failed', e); }
-    scheduleNextPoll(1500);
+    scheduleNextPoll(POLL_INTERVAL_MS + Math.floor(Math.random()*POLL_JITTER_MS));
   }, delay);
 }
 // Mobile browsers aggressively pause/throttle JS timers on a tab that's not
