@@ -2864,6 +2864,34 @@ async function saveGameState(st){
   if(!result){ showBanner('Could not save — the game may be out of sync. Check your connection and try that action again.'); }
   return result;
 }
+async function sPatch(key, patchFields, attempt){
+  attempt = attempt || 0;
+  try{
+    const url = `${APPS_SCRIPT_URL}?action=patch&key=${encodeURIComponent(key)}&patch=${encodeURIComponent(JSON.stringify(patchFields))}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if(data && data.ok) return data.value;
+    throw new Error((data && data.error) ? data.error : 'unknown error');
+  } catch(e){
+    if(attempt < 2){
+      await sleep(300 * (attempt + 1));
+      return sPatch(key, patchFields, attempt + 1);
+    }
+    console.error('patch failed after retries', key, e);
+    return null;
+  }
+}
+// Prefer this over saveGameState(st) for most actions: it only changes the
+// specific fields given, merged atomically on the backend (with locking),
+// instead of reading the whole state, changing one thing locally, and
+// writing the whole thing back — that read-modify-write pattern is exactly
+// what caused the Console's "skips questions / shows reveal early / random
+// jumps" bug when two actions happened close together.
+async function patchGameState(patchFields){
+  const merged = await sPatch(STATE_KEY, patchFields);
+  if(!merged){ showBanner('Could not save — the game may be out of sync. Check your connection and try that action again.'); }
+  return merged;
+}
 function uid(){
   try{ return crypto.randomUUID(); }catch(e){ return 'p'+Math.random().toString(36).slice(2)+Date.now(); }
 }
@@ -3525,10 +3553,7 @@ async function startConsole(){
   startPolling();
 }
 window.consoleRepeatQuestion = async function(){
-  const st = await sGet(STATE_KEY) || DEFAULT_STATE;
-  st.questionStartAt = Date.now();
-  st.updatedAt = Date.now();
-  await saveGameState(st);
+  await patchGameState({ questionStartAt: Date.now(), paused: false, pausedRemainingMs: null, updatedAt: Date.now() });
 };
 window.consoleRemovePlayer = async function(playerId){
   await sDelete('player:'+playerId);
@@ -3578,7 +3603,7 @@ function consoleControlsHtml(st){
       </div>
       <div class="console-subrow">
         ${hasPrev ? `<button class="btn violet" onclick="hostGoToQuestion(${st.qIndex-1})">◀ Previous</button>` : ''}
-        <button class="btn coral-solid" onclick="hostForceReveal()">End Early &amp; Reveal ▶</button>
+        <button class="btn coral-solid" onclick="hostForceReveal()">Reveal Answer ▶</button>
       </div>
       ${jumpToQuestionHtml(st)}`;
   }
@@ -3755,9 +3780,7 @@ function renderStyledQR(qr, containerEl){
   containerEl.innerHTML = svg;
 }
 window.hostStartGame = async function(){
-  const st = await sGet(STATE_KEY) || DEFAULT_STATE;
-  st.screen = 'intro'; st.updatedAt = Date.now();
-  await saveGameState(st);
+  await patchGameState({ screen: 'intro', updatedAt: Date.now() });
 };
 window.hostResetGame = function(){
   return new Promise((resolve)=>{
@@ -3786,21 +3809,23 @@ function renderHostIntro(){
   `);
 }
 window.hostGoToQuestion = async function(qIndex){
-  const st = await sGet(STATE_KEY) || DEFAULT_STATE;
-  st.qIndex = qIndex;
   const q = CONFIG.questions[qIndex];
-  st.screen = (q.videoType && q.videoType !== 'none') ? 'video' : 'question';
-  st.questionStartAt = st.screen === 'question' ? Date.now() : 0;
-  st.showAnswer = false;
-  st.videoLoopEnabled = false;
-  st.updatedAt = Date.now();
-  await saveGameState(st);
+  const screen = (q.videoType && q.videoType !== 'none') ? 'video' : 'question';
+  await patchGameState({
+    qIndex: qIndex,
+    screen: screen,
+    questionStartAt: screen === 'question' ? Date.now() : 0,
+    showAnswer: false,
+    videoLoopEnabled: false,
+    updatedAt: Date.now()
+  });
 };
 window.toggleVideoLoop = async function(){
-  const st = await sGet(STATE_KEY) || DEFAULT_STATE;
-  st.videoLoopEnabled = !st.videoLoopEnabled;
-  st.updatedAt = Date.now();
-  await saveGameState(st);
+  // Uses the already-known state from the last poll instead of an extra
+  // network read — avoids one more round trip, and the write itself is a
+  // single-field atomic patch either way.
+  const current = localState ? !!localState.videoLoopEnabled : false;
+  await patchGameState({ videoLoopEnabled: !current, updatedAt: Date.now() });
 };
 function videoLinkUrl(q){
   if(q.videoType === 'gdrive'){
@@ -3836,10 +3861,7 @@ function removeAnswerModalDom(){
 }
 window.closeAnswerModal = async function(){
   removeAnswerModalDom();
-  const st = await sGet(STATE_KEY) || DEFAULT_STATE;
-  st.showAnswer = false;
-  st.updatedAt = Date.now();
-  await saveGameState(st);
+  await patchGameState({ showAnswer: false, updatedAt: Date.now() });
 };
 function buildAnswerModalHtml(q){
   let correctText;
@@ -3881,10 +3903,7 @@ function syncAnswerModalDisplay(st){
   }
 }
 window.hostShowAnswerModal = async function(){
-  const st = await sGet(STATE_KEY) || DEFAULT_STATE;
-  st.showAnswer = true;
-  st.updatedAt = Date.now();
-  await saveGameState(st);
+  await patchGameState({ showAnswer: true, updatedAt: Date.now() });
 };
 let cachedVoices = [];
 function loadVoices(){
@@ -3958,10 +3977,10 @@ function loadYouTubeIframeAPI(){
   return ytApiLoadPromise;
 }
 window.triggerVideoPlay = async function(){
-  const st = await sGet(STATE_KEY) || DEFAULT_STATE;
-  st.videoPlayToken = (st.videoPlayToken || 0) + 1;
-  st.updatedAt = Date.now();
-  await saveGameState(st);
+  // Uses a timestamp instead of an incrementing counter — guarantees a
+  // "changed" value on every click without needing to read the current
+  // value first (Date.now() is always different from whatever came before).
+  await patchGameState({ videoPlayToken: Date.now(), updatedAt: Date.now() });
 };
 function renderHostVideo(q){
   removeAnswerModalDom();
@@ -4036,46 +4055,40 @@ window.hostRequestFullscreen = function(){
   }catch(e){ console.error('fullscreen request failed', e); }
 };
 window.hostStartTimer = async function(){
-  const st = await sGet(STATE_KEY) || DEFAULT_STATE;
-  st.screen = 'question';
-  st.questionStartAt = Date.now();
-  st.paused = false;
-  st.pausedRemainingMs = null;
-  st.showAnswer = false;
-  st.updatedAt = Date.now();
-  await saveGameState(st);
+  await patchGameState({
+    screen: 'question',
+    questionStartAt: Date.now(),
+    paused: false,
+    pausedRemainingMs: null,
+    showAnswer: false,
+    updatedAt: Date.now()
+  });
 };
 window.pauseQuestionTimer = async function(){
-  const st = await sGet(STATE_KEY) || DEFAULT_STATE;
+  const st = localState || {};
   if(st.screen !== 'question' || st.paused) return;
   const q = CONFIG.questions[st.qIndex];
   const limitMs = q.timeLimit*1000;
   const remainingMs = Math.max(0, limitMs - (Date.now() - st.questionStartAt));
-  st.paused = true;
-  st.pausedRemainingMs = remainingMs;
-  st.updatedAt = Date.now();
-  await saveGameState(st);
+  await patchGameState({ paused: true, pausedRemainingMs: remainingMs, updatedAt: Date.now() });
 };
 window.resumeQuestionTimer = async function(){
-  const st = await sGet(STATE_KEY) || DEFAULT_STATE;
+  const st = localState || {};
   if(st.screen !== 'question' || !st.paused) return;
   const q = CONFIG.questions[st.qIndex];
   const limitMs = q.timeLimit*1000;
   const remaining = (st.pausedRemainingMs != null) ? st.pausedRemainingMs : limitMs;
-  st.questionStartAt = Date.now() - (limitMs - remaining);
-  st.paused = false;
-  st.pausedRemainingMs = null;
-  st.updatedAt = Date.now();
-  await saveGameState(st);
+  await patchGameState({
+    questionStartAt: Date.now() - (limitMs - remaining),
+    paused: false,
+    pausedRemainingMs: null,
+    updatedAt: Date.now()
+  });
 };
 window.hostCloseGame = function(){
   return new Promise((resolve)=>{
     showConfirm('This ends the session for everyone (scores stay visible, but players can no longer answer). Continue?', async ()=>{
-      const st = await sGet(STATE_KEY) || DEFAULT_STATE;
-      st.screen = 'closed';
-      st.showAnswer = false;
-      st.updatedAt = Date.now();
-      await saveGameState(st);
+      await patchGameState({ screen: 'closed', showAnswer: false, updatedAt: Date.now() });
       resolve();
     });
   });
@@ -4124,7 +4137,7 @@ async function renderHostQuestion(q, state){
       <div class="answered-count" id="answeredCount">${answeredCount} / ${players.length} answered</div>
       <div class="row" style="margin-top:16px;">
         <button class="btn ghost" onclick="speakQuestion()">🔊 Read Aloud</button>
-        <button class="btn ghost" onclick="hostForceReveal()">End early &amp; reveal</button>
+        <button class="btn ghost" onclick="hostForceReveal()">Reveal Answer</button>
       </div>
     </div>
     <div class="host-badge">HOST VIEW</div>
@@ -4132,9 +4145,7 @@ async function renderHostQuestion(q, state){
   startRingTicker(q, state, true);
 }
 window.hostForceReveal = async function(){
-  const st = await sGet(STATE_KEY) || DEFAULT_STATE;
-  st.screen = 'reveal'; st.updatedAt = Date.now();
-  await saveGameState(st);
+  await patchGameState({ screen: 'reveal', updatedAt: Date.now() });
 };
 function tallyCardHtml(q, counts){
   const correctSet = q.type === 'multi' ? q.correctIndexes : (q.acceptableIndexes || [q.correctIndex]);
@@ -4199,14 +4210,10 @@ async function renderHostReveal(q){
   `);
 }
 window.hostShowLeaderboard = async function(){
-  const st = await sGet(STATE_KEY) || DEFAULT_STATE;
-  st.screen = 'leaderboard'; st.showAnswer = false; st.updatedAt = Date.now();
-  await saveGameState(st);
+  await patchGameState({ screen: 'leaderboard', showAnswer: false, updatedAt: Date.now() });
 };
 window.hostShowFinal = async function(){
-  const st = await sGet(STATE_KEY) || DEFAULT_STATE;
-  st.screen = 'final'; st.showAnswer = false; st.updatedAt = Date.now();
-  await saveGameState(st);
+  await patchGameState({ screen: 'final', showAnswer: false, updatedAt: Date.now() });
 };
 async function renderHostLeaderboard(state){
   removeAnswerModalDom();
