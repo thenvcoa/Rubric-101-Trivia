@@ -2535,15 +2535,7 @@ var qrcode = function() {
   .podium-bar.p3{height:80px;background:#c98a4b;}
 
   .video-wrap{width:100%;max-width:900px;aspect-ratio:16/9;background:#000;border-radius:16px;overflow:hidden;}
-  .question-layout{display:flex;gap:28px;align-items:flex-start;justify-content:center;width:100%;max-width:1180px;margin:0 auto;}
-  .question-layout:not(.with-media){flex-direction:column;align-items:center;}
-  .media-side{flex:0 0 400px;}
-  .media-side .video-wrap{max-width:400px;}
-  .question-main{flex:1;display:flex;flex-direction:column;align-items:center;min-width:0;}
-  @media (max-width: 900px){
-    .question-layout.with-media{flex-direction:column;align-items:center;}
-    .media-side{flex:0 0 auto;width:100%;max-width:420px;}
-  }
+  .question-media{width:100%;display:flex;justify-content:center;margin:4px 0 8px;}
   .video-wrap iframe, .video-wrap video{width:100%;height:100%;border:0;}
   .video-open-card{width:100%;max-width:520px;background:var(--surface2);border:2px dashed var(--surface3);border-radius:18px;padding:32px 24px;display:flex;flex-direction:column;align-items:center;margin:14px auto 0;}
 
@@ -3648,6 +3640,9 @@ async function renderConsole(st){
   const players = await getRankedPlayers();
   const q = (st.qIndex != null && CONFIG.questions[st.qIndex]) ? CONFIG.questions[st.qIndex] : null;
   const layoutClass = resolvedConsoleLayoutClass();
+  const wakeLockStatus = !('wakeLock' in navigator) ? '⚠️ Not supported on this browser'
+    : wakeLock ? '🔒 Active' : '⚠️ Not active';
+  const lastPollAgoSec = lastPollCompletedAt ? Math.round((Date.now() - lastPollCompletedAt)/1000) : null;
   render(`
     <div class="console-wrap ${layoutClass}">
       <div class="console-topbar">
@@ -3658,6 +3653,7 @@ async function renderConsole(st){
           <button class="${consoleLayoutMode==='auto'?'active':''}" onclick="setConsoleLayoutMode('auto')">Auto</button>
         </div>
       </div>
+      <div class="muted" style="font-size:11px;margin-bottom:10px;" id="consoleDiag">Wake Lock: ${wakeLockStatus} · Last synced: ${lastPollAgoSec!=null ? lastPollAgoSec+'s ago' : '—'}</div>
       <div class="console-utility-row">
         <button class="btn ghost small" onclick="refreshConsole()">🔄 Refresh</button>
         <button class="btn ghost small" onclick="hostResetGame().then(()=>refreshConsole())">↻ Restart Game</button>
@@ -4116,24 +4112,20 @@ async function renderHostQuestion(q, state){
   const players = await getAllPlayers();
   const answeredCount = players.filter(p => p.answers && p.answers[q.id]).length;
   const hasMedia = q.videoType && q.videoType !== 'none';
-  const mediaHtml = hasMedia ? `<div class="media-side">${videoEmbedHtml(q)}</div>` : '';
+  const mediaHtml = hasMedia ? `<div class="question-media">${videoEmbedHtml(q)}</div>` : '';
   render(`
     <div class="screen">
       <div class="qcounter">Question ${q.id} of ${CONFIG.questions.length}</div>
-      <div class="question-layout ${hasMedia ? 'with-media' : ''}">
-        ${mediaHtml}
-        <div class="question-main">
-          <div class="ring-wrap" id="ringWrap" style="margin:6px auto 6px;">
-            <svg viewBox="0 0 120 120" width="100" height="100">
-              <circle class="ring-bg" cx="60" cy="60" r="50"></circle>
-              <circle class="ring-fg" id="ringFg" cx="60" cy="60" r="50"></circle>
-            </svg>
-            <div class="ring-num" id="ringNum">--</div>
-          </div>
-          <h2 style="max-width:700px;margin:6px 0 4px;">${escapeMultiline(q.prompt)}</h2>
-          ${questionBodyHtml(q)}
-        </div>
+      ${mediaHtml}
+      <div class="ring-wrap" id="ringWrap" style="margin:14px auto 6px;">
+        <svg viewBox="0 0 120 120" width="100" height="100">
+          <circle class="ring-bg" cx="60" cy="60" r="50"></circle>
+          <circle class="ring-fg" id="ringFg" cx="60" cy="60" r="50"></circle>
+        </svg>
+        <div class="ring-num" id="ringNum">--</div>
       </div>
+      <h2 style="max-width:760px;margin:6px 0 4px;">${escapeMultiline(q.prompt)}</h2>
+      ${questionBodyHtml(q)}
       <div class="answered-count" id="answeredCount">${answeredCount} / ${players.length} answered</div>
       <div class="row" style="margin-top:16px;">
         <button class="btn ghost" onclick="speakQuestion()">🔊 Read Aloud</button>
@@ -4415,9 +4407,10 @@ function syncVideoLoopSetting(st){
   const label = document.getElementById('hostLoopState');
   if(label) label.textContent = st.videoLoopEnabled ? 'On' : 'Off';
 }
+let lastPollCompletedAt = null;
 async function pollLoop(){
   const st = await sGet(STATE_KEY);
-  if(!st) return;
+  if(!st){ return; }
   localState = st;
   syncAnswerModalDisplay(st);
   syncVideoPlayTrigger(st);
@@ -4430,6 +4423,7 @@ async function pollLoop(){
   } else if(myRole === 'console'){
     await renderForConsole(st);
   }
+  lastPollCompletedAt = Date.now();
 }
 let lastConsoleKey = null;
 async function renderForConsole(st){
@@ -4462,6 +4456,13 @@ async function refreshConsoleRosterOnly(){
       const answeredCount = players.filter(p => p.answers && p.answers[q.id]).length;
       statEl.textContent = `${answeredCount} / ${players.length} answered`;
     }
+  }
+  const diagEl = document.getElementById('consoleDiag');
+  if(diagEl){
+    const wakeLockStatus = !('wakeLock' in navigator) ? '⚠️ Not supported on this browser'
+      : wakeLock ? '🔒 Active' : '⚠️ Not active';
+    const lastPollAgoSec = lastPollCompletedAt ? Math.round((Date.now() - lastPollCompletedAt)/1000) : null;
+    diagEl.textContent = `Wake Lock: ${wakeLockStatus} · Last synced: ${lastPollAgoSec!=null ? lastPollAgoSec+'s ago' : '—'}`;
   }
 }
 async function renderForHost(st){
